@@ -18,7 +18,7 @@ fi
 
 echo "Creating config file at ${CONFIG_FILE} ..."
 echo "export REPO_DIR=${SCRIPT_DIR}" > "${CONFIG_FILE}"
-sudo cp "${SCRIPT_DIR}/mango/mango" "${INSTALL_DIR}"
+sudo cp "${SCRIPT_DIR}/mango" "${INSTALL_DIR}"
 echo "Setting executable permissions on ${INSTALL_DIR}/mango"
 sudo chmod +x "${INSTALL_DIR}/mango"
 echo "Done."
