@@ -1,0 +1,24 @@
+#!/bin/bash
+# Manuel Nila 2024
+# https://github.com/manila/mango
+
+set -o errexit
+set -o nounset
+set -o pipefail
+
+INSTALL_DIR="/usr/local/bin"
+CONFIG_DIR="${HOME}"
+CONFIG_FILE="${CONFIG_DIR}/.mango"
+SCRIPT_DIR="$(dirname "$(realpath "$0")")"
+
+if [[ -f "${CONFIG_FILE}" ]]; then
+  sudo rm -rf "${INSTALL_DIR}/mango"
+  sudo rm -rf "${CONFIG_FILE}"
+fi
+
+echo "Creating config file at ${CONFIG_FILE} ..."
+echo "export REPO_DIR=${SCRIPT_DIR}" > "${CONFIG_FILE}"
+sudo cp "${SCRIPT_DIR}/mango/mango" "${INSTALL_DIR}"
+echo "Setting executable permissions on ${INSTALL_DIR}/mango"
+sudo chmod +x "${INSTALL_DIR}/mango"
+echo "Done."
