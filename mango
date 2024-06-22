@@ -1,0 +1,197 @@
+#!/bin/bash
+# Manuel Nila 2024
+# https://github.com/manila/mango
+
+set -o errexit
+set -o nounset
+set -o pipefail
+
+source "${HOME}/.mango"
+
+# Global variables
+readonly BASE_DIR="${REPO_DIR}"
+readonly OVERLAY_DIR="${REPO_DIR}"
+OVERLAY=""
+USE_MINIKUBE=true
+USE_KUBECTL=false
+WATCH_DIR="${BASE_DIR}"
+INGRESS_HOSTNAME=""
+readonly MINIKUBE_IP="127.0.0.1"
+
+# ANSI color codes
+readonly GREEN='\033[0;32m'
+readonly RED='\033[0;31m'
+readonly YELLOW='\033[1;33m'
+readonly NC='\033[0m' # No Color
+
+# Function to display a success message in green
+success_msg() {
+  local msg="$1"
+  echo -e "${GREEN}Success:${NC} ${msg}"
+}
+
+# Function to display an error message in red
+error_msg() {
+  local msg="$1"
+  echo -e "${RED}Error:${NC} ${msg}"
+}
+
+# Function to display a warning message in yellow
+warning_msg() {
+  local msg="$1"
+  echo -e "${YELLOW}${msg}${NC}"
+}
+
+# Function to check if a command exists
+check_command() {
+  local cmd="$1"
+  local install_instructions="$2"
+
+  if ! command -v "${cmd}" &> /dev/null; then
+    error_msg "${cmd} could not be found. ${install_instructions}"
+    exit 1
+  fi
+}
+
+# Check to see if minikube is running
+is_minikube_running() {
+  local status
+  status=$(minikube status --format='{{.Host}}')
+  
+  if [[ "${status}" == "Running" ]]; then
+    return 0
+  else
+    return 1
+  fi
+}
+
+add_to_hosts() {
+  local IP="${MINIKUBE_IP}"
+  local HOSTNAME="${INGRESS_HOSTNAME}"
+
+  if grep -q "^${IP}\s${HOSTNAME}" /etc/hosts; then
+    warning_msg "${HOSTNAME} exists in /etc/hosts"
+  else
+    echo "${IP} ${HOSTNAME}" | sudo tee -a /etc/hosts > /dev/null
+    success_msg "${HOSTNAME} added to /etc/hosts"
+  fi
+}
+
+is_local_container_registry_running() {
+  true
+}
+
+start_local_registry() {
+  docker run -d -p 5000:5000 --restart=always --volume ~/.registry/storage:/var/lib/registry registry:2
+}
+
+cleanup() {
+  sudo sed -i '' "/${MINIKUBE_IP} ${INGRESS_HOSTNAME}/d" /etc/hosts
+  success_msg "${INGRESS_HOSTNAME} removed from /etc/hosts"
+  exit 0
+}
+
+apply_overlay() {
+  OVERLAY="$1"
+  shift
+
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --host|-h)
+        shift
+        INGRESS_HOSTNAME="$1"
+        USE_MINIKUBE=true
+        LAUNCH_SERVICE=true
+        warning_msg "when specifying host, minikube tunnel (instead of kubectl) will be used"
+        ;;
+      --minikube|-m)
+        USE_MINIKUBE=true
+        ;;
+      --watch|-w)
+        LAUNCH_SERVICE=true
+        ;;
+      *)
+        echo "Unknown parameter passed: $1"
+        exit 1
+        ;;
+    esac
+    shift
+  done
+
+  if [[ ! -d "${OVERLAY_DIR}/${OVERLAY}" ]]; then
+    echo "The specified overlay directory does not exist: ${OVERLAY_DIR}/${OVERLAY}"
+    exit 1
+  fi
+
+  if [[ "${USE_MINIKUBE}" == true ]]; then
+    check_command "minikube" "Please install minikube following the instructions at https://minikube.sigs.k8s.io/docs/start/"
+
+    echo "Checking minikube version..."
+    minikube version
+
+    echo "Checking if minikube is running"
+    if is_minikube_running; then
+      echo "minikube is running"
+    else
+      echo "Starting minikube"
+      minikube start
+    fi
+
+    echo "Applying manifests to minikube..."
+    minikube kubectl -- apply -k "${OVERLAY_DIR}/${OVERLAY}"
+
+    if [[ $? -eq 0 ]]; then
+      success_msg "Deployment to minikube succeeded."
+    else
+      error_msg "Deployment to minikube failed."
+      exit 1
+    fi
+
+    if [[ -n "${INGRESS_HOSTNAME}" ]]; then
+      echo "Adding ${INGRESS_HOSTNAME} to /etc/hosts ..."
+      add_to_hosts "${MINIKUBE_IP}" "${INGRESS_HOSTNAME}"
+    fi
+
+    if [[ "${LAUNCH_SERVICE}" == true ]]; then
+      echo "Checking if minikube has ingress enabled"
+      minikube addons enable ingress
+      minikube tunnel & fg
+
+      trap 'cleanup' SIGINT
+
+      fswatch -0 "${OVERLAY_DIR}" | while read -d "" event; do
+        minikube kubectl -- apply -k "${OVERLAY_DIR}/${OVERLAY}"
+      done
+    fi
+
+  else
+    check_command "kubectl" "Please install kubectl following the instructions at https://kubernetes.io/docs/tasks/tools/install-kubectl/"
+
+    echo "Checking kubectl version..."
+    kubectl version --client
+
+    echo "Applying manifests to Kubernetes cluster..."
+    kubectl apply -k "${OVERLAY_DIR}/${OVERLAY}"
+
+    if [[ $? -eq 0 ]]; then
+      success_msg "Deployment to Kubernetes cluster succeeded."
+    else
+      error_msg "Deployment to Kubernetes cluster failed."
+      exit 1
+    fi
+  fi
+}
+
+case "$1" in
+  run)
+    shift
+    apply_overlay "$@"
+    ;;
+  create)
+    create_overlay "$@"
+    ;;
+  *)
+    error_msg "Unknown parameter: $1"
+    exit 1
+    ;;
+esac
