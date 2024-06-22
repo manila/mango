@@ -6,14 +6,14 @@ This is an opinionated script for developing and deploying Kustomize templates t
 
 ## Usage
 
-- `--ingress` hostname that should be added to /etc/hosts by mango 
+- `--ingress-host` hostname that should be added to /etc/hosts by mango 
 - `--watch` hotreload when changes are made
 
-`mango run [service_name_folder or cluster_name] --ingress [host_name] --watch`
+`mango run [service_name_folder or cluster_name] --ingress-host [host_name] --watch`
 
 e.g.
 
-`mango run examples/hello-world --ingress hello-world.manila.internal`
+`mango run examples/hello-world --ingress-host hello-world.manila.internal`
 
 ## Installation
 
